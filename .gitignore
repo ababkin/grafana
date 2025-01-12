@@ -1,3 +1,4 @@
+.stack-work
 *.ghc*
 *dist*
 *dist-newstyle*
@@ -8,3 +9,5 @@
 result*
 *.hi
 *.o
+kb/
+.cursorignore

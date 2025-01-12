@@ -8,6 +8,7 @@ import Data.Aeson (ToJSON(..))
 import Data.Aeson ((.=), Value(..))
 import Data.Map.Strict (Map)
 import Data.Text (Text)
+import Data.Aeson.Key (fromText)
 
 import qualified Data.Aeson as AE
 
@@ -28,14 +29,14 @@ data PieChart = PieChart
   , pieType :: PieType
   }
 
-pieChartToPairs :: PieChart -> [(Text, AE.Value)]
+pieChartToPairs :: PieChart -> [(AE.Key, AE.Value)]
 pieChartToPairs (PieChart {..}) =
-  [ "type" .= String "grafana-piechart-panel"
-  , "title" .= pieChartTitle
-  , "targets" .= makeTargets pieChartQueries
-  , "format" .= pieChartUnit
-  , "pieType" .= pieType
-  , "aliasColors" .= pieChartAliasColors
+  [ fromText "type" .= String "grafana-piechart-panel"
+  , fromText "title" .= pieChartTitle
+  , fromText "targets" .= makeTargets pieChartQueries
+  , fromText "format" .= pieChartUnit
+  , fromText "pieType" .= pieType
+  , fromText "aliasColors" .= pieChartAliasColors
   ]
 
 pieChartPanel :: PieChart -> GridPos -> Panel

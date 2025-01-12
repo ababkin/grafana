@@ -73,6 +73,7 @@ module Grafana
 import Data.Aeson (ToJSON(..), FromJSON(..))
 import Data.Aeson (Value(..), (.=), object)
 import Data.Aeson.Encode.Pretty (encodePretty)
+import Data.Aeson.Key (fromText)
 import Data.ByteString (ByteString)
 import Data.Char (isAlphaNum)
 import Data.Coerce (coerce)
@@ -81,22 +82,23 @@ import Data.Maybe (isJust, maybeToList)
 import Data.Text (Text)
 import Data.Word (Word8)
 import GHC.Generics (Generic)
+import Control.Arrow()
 
 import qualified Data.Aeson as AE
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
 
-type PanelConfig = [(Text, AE.Value)]
+type PanelConfig = [(AE.Key, AE.Value)]
 
 tshow :: Show a => a -> Text
 tshow = T.pack . show
 {-# inlineable tshow #-} -- not exported, should inline anyway
 
-optionalField :: ToJSON a => Text -> Maybe a -> PanelConfig
+optionalField :: ToJSON a => Text -> Maybe a -> [(AE.Key, AE.Value)]
 optionalField key = \case
   Nothing -> []
-  Just x -> [ key .= x ]
+  Just x -> [ fromText key .= x ]
 
 data Templating = Templating
   { templatingOptions :: NonEmpty Text
@@ -182,16 +184,17 @@ instance ToJSON GridPos where
       ]
 
 data Column = Column
-  { columnLabel :: !Text
-  , columnValue :: !Text
-  } deriving stock (Eq, Generic, Read, Show)
+  { columnName :: Text
+  , columnType :: Text
+  } deriving (Eq, Show, Generic)
 
-instance ToJSON Column where
-  toJSON (Column label value) =
-    object
-      [ "text" .= String label
-      , "value" .= String value
-      ]
+instance Read Column where
+  readsPrec _ input = 
+    let parseColumn = do
+          (name, rest1) <- lex input
+          (colType, rest2) <- lex rest1
+          return (Column (T.pack name) (T.pack colType), rest2)
+    in parseColumn
 
 columns :: [Text] -> [Column]
 columns = fmap (\name -> Column (T.toTitle name) (T.toLower name))
@@ -408,33 +411,39 @@ table (Table {..}) =
 
 graph :: Graph -> PanelConfig
 graph (Graph {..}) =
-  [ "type" .= String "graph"
+  [ "type" .= String "timeseries"
   , "title" .= graphTitle
   , "targets" .= makeTargets graphQueries
-  , "nullPointMode" .= graphNullPointMode
-  , "bars" .= graphHasBars
-  , "steppedLine" .= graphHasSteppedLine
+  , "options" .= object [
+      "legend" .= object [
+        "showLegend" .= True
+      ]
+    , "tooltip" .= object [
+        "mode" .= String "single"
+      ]
+    ]
   ]
   <> case graphUnit of
        Nothing -> []
        Just su ->
-         [ "yaxes" .=
-           [ object
-               [ "format" .= su
-               , "label" .= Null
-               , "logBase" .= Number 1
-               , "max" .= Null
-               , "min" .= Null
-               , "show" .= True
+         [ "fieldConfig" .= object [
+             "defaults" .= object [
+               "unit" .= su,
+               "custom" .= object [
+                 "lineInterpolation" .= 
+                   if graphHasSteppedLine 
+                   then String "stepAfter"
+                   else String "linear",
+                 "barWidth" .= Number 1,
+                 "drawStyle" .=
+                   if graphHasBars
+                   then String "bars" 
+                   else String "line",
+                 "spanNulls" .= 
+                   case graphNullPointMode of
+                     Connected -> True
                ]
-           , object
-               [ "format" .= String "short"
-               , "label" .= Null
-               , "logBase" .= Number 1
-               , "max" .= Null
-               , "min" .= Null
-               , "show" .= True
-               ]
+             ]
            ]
          ]
 
@@ -749,13 +758,13 @@ defaultHeatmap = Heatmap
   , heatmapDataFormat = TsBuckets
   }
 
-heatmap :: Heatmap -> PanelConfig
+heatmap :: Heatmap -> [(AE.Key, AE.Value)]
 heatmap Heatmap {..} =
-    [ "type" .= String "heatmap"
-    , "title" .= heatmapTitle
-    , "color" .= heatmapColor
-    , "dataFormat" .= heatmapDataFormat
-    , "tooltip" .= object [ "show" .= False, "showHistogram" .= False ]
+    [ fromText "type" .= String "heatmap"
+    , fromText "title" .= heatmapTitle
+    , fromText "color" .= heatmapColor
+    , fromText "dataFormat" .= heatmapDataFormat
+    , fromText "tooltip" .= object [ "show" .= False, "showHistogram" .= False ]
     ]
 
 heatmapPanel :: Heatmap -> GridPos -> Panel
@@ -769,11 +778,11 @@ data HeatmapColor = HeatmapColor
 
 instance ToJSON HeatmapColor where
   toJSON o = object $
-    [ "mode" .= String "spectrum"
-    , "cardColor" .= RGB 0xb4 0xff 0x00
-    , "colorScale" .= String "sqrt"
-    , "exponent" .= Number 0.5
-    , "colorScheme" .= heatmapColorScheme o
+    [ fromText "mode" .= String "spectrum"
+    , fromText "cardColor" .= RGB 0xb4 0xff 0x00
+    , fromText "colorScale" .= String "sqrt"
+    , fromText "exponent" .= Number 0.5
+    , fromText "colorScheme" .= heatmapColorScheme o
     ]
     <> optionalField "min" (heatmapMin o)
     <> optionalField "max" (heatmapMax o)
@@ -804,3 +813,9 @@ instance ToJSON HeatmapDataFormat where
   toJSON = \case
     Timeseries -> String "timeseries"
     TsBuckets -> String "tsbuckets"
+
+instance ToJSON Column where
+  toJSON Column{..} = object
+    [ fromText "text" .= columnName
+    , fromText "type" .= columnType
+    ]
